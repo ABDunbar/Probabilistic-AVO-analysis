@@ -7,6 +7,12 @@ import math
 import statistics
 import lasio as lasio
 from scipy.stats import gaussian_kde
+import platform
+import glob
+import os
+import warnings
+warnings.filterwarnings("ignore")
+
 
 # Rock properties
 K_QUARTZ = 36.8  # GPa
@@ -14,22 +20,10 @@ MU_QUARTZ = 44  # GPa
 K_CLAY = 15  # GPa
 MU_CLAY = 5  # GPa
 
-
 phi=np.linspace(0.01, 0.4)
 
 
-# define basic styles for plotting log curves (sty0), sand (sty1) and shale (sty2)
-sty0 = {'lw':1, 'color':'k', 'ls':'-'}
-sty1 = {'marker':'o', 'color':'g', 'ls':'none', 'ms':6, 'mec':'none', 'alpha':0.5}
-sty2 = {'marker':'o', 'color':'r', 'ls':'none', 'ms':6, 'mec':'none', 'alpha':0.5}
 
-
-# import warnings
-# warnings.filterwarnings("ignore")
-
-import platform
-import glob
-import os
 my_os = platform.system()
 if my_os == 'Windows':
     path = ".\data"
@@ -60,8 +54,6 @@ def load():
         well_df[i] = well_df[i].replace(-9999.0, np.NaN)
 
     return well_df
-
-
 
 
 def well_add_features(df):
@@ -136,7 +128,6 @@ def well_add_features(df):
     df["FCODES"] = np.select(conditions, facies_codes)
 
     return df
-
 
 
 def vshale_from_gr(df):
@@ -229,119 +220,4 @@ def vrh(volumes,k,mu):
     k0 = (k_u+k_l) / 2.
     mu0 = (mu_u+mu_l) / 2.
     return k_u, k_l, mu_u, mu_l, k0, mu0
-
-
-
-
-# Fluid Replacement Modelling
-
-def xfrm(vp1, vs1, rho1, rho_f1, k_f1, rho_f2, k_f2, k0, phi):
-    """
-    INPUT
-    vp1, vs1, rho1: (vector) Measured Vp, Vs and density saturated with fluid 1
-    rho_f1, k_f1:   (vector) Density and bulk modulus of fluid 1 (requires Sw)
-    rho_f2, k_f2:   (scalar) Density and bulk modulus of fluid 2 (rho_o, k_o, rho_g, k_g, etc)
-    k0:             (scalar) mineral bulk modulus - (k_u - k_l)/2
-    phi:            (vector) porosity
-    
-    RETURN 
-    vp2, vs2, rho2, k_s2: Vp, Vs, density and bulk modulus of rock with fluid 2. 
-    
-    Velocities are in m/s and densities in g/cm3.
-    
-    USAGE:
-    vp1ox, vs1ox, rho1ox, k1ox = frm(vp1, vs1, rho1, RHO_WATER, K_WATER, RHO_GAS, K_GAS, K0, phiex1)
-    """
-    # convert Vp,Vs from m/s to km/s for calculation
-    vp1  = vp1 / 1000.
-    vs1  = vs1 / 1000.
-    
-    mu1  = rho1 * vs1**2.
-    k_s1 = rho1 * vp1**2 - (4./3.)*mu1  # mu1 = rho1 * vs1**2
-    
-    # The dry rock bulk modulus
-    kdry = (k_s1 * ((phi*k0)/k_f1 + 1 - phi) - k0) / ((phi*k0)/k_f1 + (k_s1/k0) - 1 - phi)
-    
-    # Now we can apply Gassmann to get the new values
-    k_s2 = kdry + (1- (kdry/k0))**2 / ( (phi/k_f2) + ((1-phi)/k0) - (kdry/k0**2) )
-    rho2 = rho1 - phi*rho_f1 + phi*rho_f2
-    mu2  = mu1
-    vp2  = np.sqrt(((k_s2 + (4./3)*mu2))/rho2)
-    vs2  = np.sqrt((mu2/rho2))
-
-    # return Vp,Vs as m/s
-    return vp2*1000, vs2*1000, rho2, k_s2
-
-
-def frm(vp_1, vs_1, rho_1, rho_f1, k_f1, rho_f2, k_f2, K0, phi_):
-    """
-    INPUT
-    vp1, vs1, rho1: (vector) Measured Vp, Vs and density saturated with fluid 1
-    rho_f1, k_f1:   (vector) Density and bulk modulus of fluid 1 (requires Sw)
-    rho_f2, k_f2:   (scalar) Density and bulk modulus of fluid 2 (rho_o, k_o, rho_g, k_g, etc)
-    k0:             (scalar) mineral bulk modulus - (k_u - k_l)/2
-    phi:            (vector) porosity
-
-    RETURN
-    vp2, vs2, rho2, k_s2: Vp, Vs, density and bulk modulus of rock with fluid 2.
-
-    Velocities are in m/s and densities in g/cm3.
-
-    USAGE:
-    vp1ox, vs1ox, rho1ox, k1ox = frm(vp1, vs1, rho1, RHO_WATER, K_WATER, RHO_GAS, K_GAS, K0, phiex1)
-    """
-
-    vp_frm = []
-    vs_frm = []
-    rho_frm = []
-
-    for i in range(0, len(vp_1)):
-
-        # convert Vp,Vs from m/s to km/s for calculation
-        vp1 = vp_1[i] / 1000.
-        vs1 = vs_1[i] / 1000.
-        rho1 = rho_1[i]
-        phi = phi_[i]
-        k0 = K0[i]
-
-        mu1 = rho1 * vs1 ** 2.
-        rho2 = rho1 - phi * rho_f1 + phi * rho_f2
-        rho_frm.append(rho2)
-        mu2 = mu1
-        vs2 = np.sqrt((mu2 / rho2))
-        vs_frm.append(vs2*1000)
-
-        k_s1 = rho1 * vp1 ** 2 - (4. / 3.) * mu1  # mu1 = rho1 * vs1**2    
-
-        # The dry rock bulk modulus
-        kdry = (k_s1 * ((phi*k0)/k_f1+1-phi)-k0) / ((phi*k0)/k_f1+(k_s1/k0)-1-phi)
-
-        # kdry values were negative when k0=36 was too high -> use vrh()
-        # Vp2 values were getting > 6000 when kdry was > 70 (why so high?)
-        if (0 < kdry < 36):
-
-            # Now we can apply Gassmann to get the new values
-            k_s2 = kdry + (1 - (kdry / k0)) ** 2 / ((phi / k_f2) + ((1 - phi) / k0) - (kdry / k0 ** 2))
-            
-            if k_s2 > 0:
-                
-            # print(f"k_s2: {k_s2}")
-                vp2 = np.sqrt(((k_s2 + (4. / 3.) * mu2)) / rho2)
-                # vp_frm.append(np.round(vp2*1000, 0))
-                vp_frm.append(int(vp2*1000))
-            else: 
-                vp2 = vp1
-                vp_frm.append(vp2*1000)
-
-        else:
-            vp2 = vp1
-            vp_frm.append(vp2*1000)
-            
-    # return as arrays
-    vp_frm = np.array(vp_frm)
-    vs_frm = np.array(vs_frm)
-    rho_frm = np.array(rho_frm)
-    
-    return vp_frm, vs_frm, rho_frm, k_s2
-
 
